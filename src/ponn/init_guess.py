@@ -303,7 +303,6 @@ def init_guess(
     coeffs: SSDynamicsCoeffs,
     r0: torch.Tensor, v0: torch.Tensor, rf: torch.Tensor, vf: torch.Tensor,
     mode: Literal["zero", "linear"] = "linear",
-    lam_r_const: float = 0.0,
     mu_gs_init: float = 1.0,
     mu_a_init: float = 1e-3,  # each element for (N,) vector
     ridge: float = 1e-8,
@@ -377,44 +376,7 @@ def init_guess(
     beta_lam_r = lam_r_T.T  # (3,L)
 
     tmp_betas = CEBetas(beta_r=beta_r, beta_lam_r=beta_lam_r, beta_lam_v=beta_lam_v)
-    out = model.eval(t, tmp_betas, r0=r0, v0=v0, rf=rf, vf=vf)
-    r_guess = out.r
-    lam_v_guess = out.lam_v
-    lam_r_dot_guess = out.lam_r_dot
-
-    pC_gs_pr = pC_gs_pr_from_cone(
-        r_guess,
-        cone=cone_from_yaml(cfg, rf=rf, device=device, dtype=dtype),
-        t=t
-        )
-    
-    Mlamv = _apply_lin(M_, lam_v_guess)
-
-    test = lam_r_dot_guess + Mlamv
-
-
-    print("dd")
-
-    # 7번 만들어야됨
-    # 7번 만들어야됨
-    # 7번 만들어야됨
-    # 7번 만들어야됨
-    # 7번 만들어야됨
-    # 7번 만들어야됨
-    # 7번 만들어야됨
-    # 7번 만들어야됨
-
-
-
-
-    # --- fit beta_lam_r as constant ---
-    lam_r_target = torch.full((N,), float(lam_r_const), device=device, dtype=dtype)
-    beta_lam_r = torch.stack(
-        [_ridge_ls_sigma_to_target(sigma, lam_r_target, ridge) for _ in range(3)],
-        dim=0,
-    )  # (3,L)
-
-    betas = CEBetas(beta_r=beta_r, beta_lam_r=beta_lam_r, beta_lam_v=beta_lam_v)
+    betas = tmp_betas
     mu_gs_vec = torch.full((N,), float(mu_gs_init), device=device, dtype=dtype)
 
     return TrainParams(betas=betas, mu_a=mu_a_vec, mu_gs=mu_gs_vec)

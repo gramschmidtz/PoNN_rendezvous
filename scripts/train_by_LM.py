@@ -396,9 +396,8 @@ def main():
         coeffs=coeffs,
         r0=r0, v0=v0, rf=rf, vf=vf,
         mode=mode,
-        lam_r_const=lam_r_const,
-        mu_a_init=mu_a_init,
         mu_gs_init=mu_gs_init,
+        mu_a_init=mu_a_init,
         ridge=ridge,
     )
     x0 = guess.pack().to(device=device, dtype=dtype)

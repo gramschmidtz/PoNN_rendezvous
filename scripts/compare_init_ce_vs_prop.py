@@ -126,10 +126,9 @@ def main():
     ap.add_argument("--dtype", type=str, default="float64")
     ap.add_argument("--n", type=int, default=None)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--init", type=str, default="zero", choices=["zero", "linear"])
+    ap.add_argument("--init", type=str, default="linear", choices=["zero", "linear"])
     ap.add_argument("--mu_gs", type=float, default=1.0)
     ap.add_argument("--mu_a", type=float, default=1e-3)
-    ap.add_argument("--lam_r_const", type=float, default=0.0)
     ap.add_argument("--ridge", type=float, default=1e-8)
     ap.add_argument("--cone_height", type=float, default=0.2)
     ap.add_argument("--show_cone_always", action="store_true")
@@ -176,7 +175,6 @@ def main():
         coeffs=coeffs,
         r0=r0, v0=v0, rf=rf, vf=vf,
         mode=args.init,
-        lam_r_const=args.lam_r_const,
         mu_gs_init=args.mu_gs,
         mu_a_init=args.mu_a,
         ridge=args.ridge,

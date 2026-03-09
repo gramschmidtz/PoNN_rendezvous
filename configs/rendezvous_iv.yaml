@@ -66,7 +66,7 @@ loss_weights:
   w_lam_r: 1.0
   w_lam_v: 1.0
   w_gs: 700.0
-  w_a: 700.0
+  w_a: 2000.0
 
 run:
   out_dir: runs
@@ -79,11 +79,11 @@ train:
   print_every: 1
 
 init_guess:
-  method: linear      # linear|zero
+  method: zero      # linear|zero
   ridge: 1.0e-8
   lam_r_const: 0.0
   lam_v_const: 1.0    # 안씀
-  mu_a_init: 1.0e-3
+  mu_a_init: 1.0e-5
   mu_gs_init: 1.0
 
 optimizer:
