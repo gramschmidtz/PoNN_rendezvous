@@ -1,0 +1,98 @@
+# configs/rendezvous_iv.yaml
+
+# IV. Example Application: Energy-Optimal Rendezvous
+# Units are kept as in the paper's example: km, s, km/s, km/s^2.
+# Edit here; everything else should read from this file.
+
+seed: 0
+
+time:
+  t0: 0.0
+  tf: 300.0
+
+discretization:
+  # Number of collocation points (N_dis in the paper)
+  n_dis: 50
+  # Normalized domain for ELM/CE, typically [-1, 1]
+  z0: -1.0
+  zf: 1.0
+
+elm:
+  # Hidden neurons L (Table 1)
+  n_hidden: 50
+  # Activation used by ELM for free functions; paper uses atan
+  activation: atan
+  weight_sampling:
+    # Paper Eq. (60)-(61): w_q ~ U(-(L-10)/10 - 4, (L-10)/10 + 4), c_q ~ U(-1, 1)
+    # With L = n_hidden = 22 => w in [-5.2, 5.2]
+    w_min: -5.2
+    w_max: 5.2
+    c_min: -1.0
+    c_max: 1.0
+
+orbit:
+  # Earth and target-orbit parameters (Table 1)
+  Re_km: 6378.165
+  mu_km3_s2: 398600.0
+  J2: 0.0010826
+  Rt_km: 6878.165
+  it_deg: 45.0
+
+boundary:
+  # Initial and terminal states (Table 1)
+  r0_km: [-0.1, -1.0, 0.0]
+  v0_km_s: [0.0, 0.0, 0.0]
+  rf_km: [0.0, -0.1, 0.0]
+  vf_km_s: [0.0, 0.0, 0.0]
+
+constraints:
+  # Maximum control magnitude a_{c,max} (Eq. 35)
+  control_max_km_s2: 4.5e-5
+  cone:
+    # Maximum approach-cone half-angle gamma_{gs,max} in degrees (Eq. 36)
+    gamma_max_deg: 5.0
+    # Unit vector n-hat defining the cone axis (Eq. 36-37)
+    n_hat: [0.0, -1.0, 0.0]
+    activation:
+      mode: time
+      # Constraint activation time t_c (Eq. 39)
+      tc_s: 200.0
+      # Steepness k for tanh activation (Eq. 39)
+      k: 1000.0
+
+loss_weights:
+  # Weights for residual stacking (Table 1)
+  w_v: 3000.0
+  w_lam_r: 1.0
+  w_lam_v: 1.0
+  w_gs: 700.0
+  w_a: 700.0
+
+run:
+  out_dir: runs
+  name: rendezvous_iv_lm
+
+train:
+  device: cpu
+  dtype: float64
+  save_every: 20
+  print_every: 1
+
+init_guess:
+  method: linear      # linear|zero
+  ridge: 1.0e-8
+  lam_r_const: 0.0
+  lam_v_const: 1.0    # 안씀
+  mu_a_init: 1.0e-3
+  mu_gs_init: 1.0
+
+optimizer:
+  method: levenberg_marquardt
+  damping0: 1.0e-2
+  damping_min: 1.0e-20
+  damping_max: 1.0e+20
+  damp_increase: 10.0
+  damp_decrease: 0.3
+  max_iters: 300
+  grad_inf_tol: 1.0e-10
+  step_inf_tol: 1.0e-12
