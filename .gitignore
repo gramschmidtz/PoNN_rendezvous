@@ -1,4 +1,4 @@
 /.vscode
 /runs
 /tests
-/src/__pycache__
+*.pyc
