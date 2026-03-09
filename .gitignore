@@ -1,3 +1,5 @@
 /.vscode
 /runs
 /tests
+/src/__pycache__
+/src/ponn/__pycache__
