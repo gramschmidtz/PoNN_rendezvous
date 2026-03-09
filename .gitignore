@@ -1,5 +1,4 @@
 /.vscode
 /runs
 /tests
-/src/__pycache__
-/src/ponn/__pycache__
+*/__pycache__/
