@@ -63,10 +63,10 @@ constraints:
 loss_weights:
   # Weights for residual stacking (Table 1)
   w_v: 3000.0
-  w_lam_r: 1.0
-  w_lam_v: 1.0
-  w_gs: 700.0
-  w_a: 2000.0
+  w_lam_r: 700.0
+  w_lam_v: 700.0
+  w_gs: 100.0
+  w_a: 100.0
 
 run:
   out_dir: runs
@@ -83,8 +83,8 @@ init_guess:
   ridge: 1.0e-8
   lam_r_const: 0.0
   lam_v_const: 1.0    # 안씀
-  mu_a_init: 1.0e-5
-  mu_gs_init: 1.0
+  mu_a_init: 0.0
+  mu_gs_init: 0.0
 
 optimizer:
   method: levenberg_marquardt

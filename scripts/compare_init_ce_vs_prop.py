@@ -19,7 +19,7 @@ from src.ponn.ce import CEModel
 from src.ponn.dynamics import SSOrbitParams, compute_ss_coeffs
 from src.ponn.propagate import propagate_ss_rv, lerp_u, hold_u
 from src.ponn.init_guess import init_guess
-from src.ponn.ponn import control_from_costate
+from src.ponn.constraint import ConeConstraint, ConeActivation, ControlConstraint, C_gs_from_cone, C_a_from_ctrl
 
 
 # -------------------------
@@ -126,9 +126,9 @@ def main():
     ap.add_argument("--dtype", type=str, default="float64")
     ap.add_argument("--n", type=int, default=None)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--init", type=str, default="linear", choices=["zero", "linear"])
-    ap.add_argument("--mu_gs", type=float, default=1.0)
-    ap.add_argument("--mu_a", type=float, default=1e-3)
+    ap.add_argument("--init", type=str, default="zero", choices=["zero", "linear"])
+    ap.add_argument("--mu_gs", type=float, default=0.0)
+    ap.add_argument("--mu_a", type=float, default=1e-5)
     ap.add_argument("--ridge", type=float, default=1e-8)
     ap.add_argument("--cone_height", type=float, default=0.2)
     ap.add_argument("--show_cone_always", action="store_true")
@@ -147,6 +147,33 @@ def main():
     # boundary
     r0_np, v0_np, rf_np, vf_np = boundary_from_yaml(cfg)
 
+    r0 = torch.tensor(r0_np, device=device, dtype=dtype)
+    v0 = torch.tensor(v0_np, device=device, dtype=dtype)
+    rf = torch.tensor(rf_np, device=device, dtype=dtype)
+    vf = torch.tensor(vf_np, device=device, dtype=dtype)
+
+    # constraints
+    cone_cfg = cfg["constraints"]["cone"]
+    cone_act_cfg = cone_cfg["activation"]
+
+    cone = ConeConstraint(
+        rf=torch.tensor(rf_np, device=device, dtype=dtype),
+        n_hat=torch.tensor(cone_cfg["n_hat"], device=device, dtype=dtype),
+        gamma_max_deg=float(cone_cfg["gamma_max_deg"]),
+        activation=ConeActivation(
+            mode=cone_act_cfg["mode"],
+            t_c=cone_act_cfg.get("tc_s", None),
+            r_c=cone_act_cfg.get("rc_km", None),
+            k=float(cone_act_cfg.get("k", 1000.0))
+        ),
+        eps=float(cone_cfg.get("eps",1e-12))
+    )
+
+    ctrl = ControlConstraint(
+        a_c_max=float(cfg["constraints"]["control_max_km_s2"]),
+        eps=1e-12
+    )
+
     t0 = float(cfg["time"]["t0"])
     tf = float(cfg["time"]["tf"])
     n_dis = int(cfg["discretization"]["n_dis"])
@@ -155,21 +182,17 @@ def main():
     t_train_np = np.linspace(t0, tf, n_dis)
 
     # prop grid: finer
-    t_prop_np = np.linspace(t0, tf, 10 * n_dis + 1)
+    t_prop_np = np.linspace(t0, tf, n_dis)
 
     t_train = torch.tensor(t_train_np, device=device, dtype=dtype)
     t_prop  = torch.tensor(t_prop_np,  device=device, dtype=dtype)
 
-    r0 = torch.tensor(r0_np, device=device, dtype=dtype)
-    v0 = torch.tensor(v0_np, device=device, dtype=dtype)
-    rf = torch.tensor(rf_np, device=device, dtype=dtype)
-    vf = torch.tensor(vf_np, device=device, dtype=dtype)
 
     # CE model
     model = CEModel.from_yaml(cfg, seed=args.seed, device=device, dtype=dtype)
 
     # unified init
-    guess = init_guess(
+    guess, u_guess, a_c_guess, a_c_hat_guess = init_guess(
         model,
         t_train,
         coeffs=coeffs,
@@ -183,10 +206,13 @@ def main():
     # eval CE
     out_init = model.eval(t_train, guess.betas, r0=r0, v0=v0, rf=rf, vf=vf)
 
-    # control from costate (mu_a is (N,) vector)
-    ctrl_init = control_from_costate(out_init.lam_v, guess.mu_a)
-    u_init = ctrl_init.u                       # (N,3)
-    a_c_init = ctrl_init.a_c                   # (N,)
+    # # control from costate (mu_a is (N,) vector)
+    # ctrl_init = control_from_costate(out_init.lam_v, guess.mu_a)
+    # u_init = ctrl_init.u                       # (N,3)
+    # a_c_init = ctrl_init.a_c                   # (N,)
+
+    u_init = u_guess                       # (N,3)
+    a_c_init = a_c_guess                   # (N,)
 
     # --- build u on prop grid from (t_train, u_init) ---
     if args.u_mode == "lerp":
@@ -202,6 +228,19 @@ def main():
     with torch.no_grad():
         a_prop = (prop.r @ coeffs.M.T) + (prop.v @ coeffs.N.T) + u_prop
         a_c_prop = torch.linalg.norm(u_prop, dim=-1)
+
+        Cgs_init = C_gs_from_cone(out_init.r, cone=cone, t=t_train)
+        Ca_init = C_a_from_ctrl(a_c_init, ctrl)
+
+        dyn_term = (out_init.r @ coeffs.M.T) + (out_init.v @ coeffs.N.T) + u_init
+
+        H_init = (
+            0.5 * (a_c_init ** 2)
+            + torch.sum(out_init.lam_r * out_init.v, dim=-1)
+            + torch.sum(out_init.lam_v * dyn_term, dim=-1)
+            + guess.mu_gs * Cgs_init
+            + guess.mu_a * Ca_init
+        )
     
     # numpy (CE: train grid)
     r_ce = out_init.r.detach().cpu().numpy()
@@ -226,6 +265,10 @@ def main():
 
     u_pr_np = u_prop.detach().cpu().numpy()
     ac_pr = a_c_prop.detach().cpu().numpy()
+
+    H_ce = H_init.detach().cpu().numpy()
+    Cgs_ce = Cgs_init.detach().cpu().numpy()
+    Ca_ce = Ca_init.detach().cpu().numpy()
 
     # =========================
     # fig1: 3D + cone
@@ -396,6 +439,19 @@ def main():
     ax5.legend(loc="best")
 
     fig5.tight_layout()
+
+    # =========================
+    # fig6: Hamiltonian H(t)
+    # =========================
+    fig6 = plt.figure(figsize=(10, 4))
+    ax6 = fig6.add_subplot(111)
+    ax6.plot(t_train_np, H_ce, linewidth=2.0, label="Hamiltonian")
+    ax6.set_title("Hamiltonian vs time")
+    ax6.set_xlabel("t [s]")
+    ax6.set_ylabel("H")
+    ax6.grid(True, alpha=0.3)
+    ax6.legend(loc="best")
+    fig6.tight_layout()
 
     plt.show()
 

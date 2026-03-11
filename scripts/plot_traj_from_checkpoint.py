@@ -15,10 +15,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.ponn.ce import CEModel
+from src.ponn.ce import CEModel, CEBetas
 from src.ponn.dynamics import SSOrbitParams, compute_ss_coeffs
 from src.ponn.propagate import propagate_ss_rv, lerp_u, hold_u
 from src.ponn.ponn import control_from_costate
+from src.ponn.constraint import (
+    ConeConstraint,
+    ConeActivation,
+    ControlConstraint,
+    C_gs_from_cone,
+    C_a_from_ctrl
+)
 
 
 # -------------------------
@@ -238,21 +245,45 @@ def main():
     # boundary
     r0_np, v0_np, rf_np, vf_np = boundary_from_yaml(cfg)
 
+    r0 = torch.tensor(r0_np, device=device, dtype=dtype)
+    v0 = torch.tensor(v0_np, device=device, dtype=dtype)
+    rf = torch.tensor(rf_np, device=device, dtype=dtype)
+    vf = torch.tensor(vf_np, device=device, dtype=dtype)
+
     t0 = float(cfg["time"]["t0"])
     tf = float(cfg["time"]["tf"])
     n_dis = int(cfg["discretization"]["n_dis"])
 
+    # constraints
+    cone_cfg = cfg["constraints"]["cone"]
+    cone_act_cfg = cone_cfg["activation"]
+
+    cone_obj = ConeConstraint(
+        rf=rf,
+        n_hat=torch.tensor(cone_cfg["n_hat"], device=device, dtype=dtype),
+        gamma_max_deg=float(cone_cfg["gamma_max_deg"]),
+        activation=ConeActivation(
+            mode=cone_act_cfg["mode"],
+            t_c=cone_act_cfg.get("tc_s", None),
+            r_c=cone_act_cfg.get("rc_km", None),
+            k=float(cone_act_cfg.get("k", 1000.0)),
+        ),
+        eps=float(cone_cfg.get("eps", 1e-12)),
+    )
+
+    ctrl_obj = ControlConstraint(
+        a_c_max=float(cfg["constraints"]["control_max_km_s2"]),
+        eps=1e-12,
+    )
+
     # grids
     t_train_np = np.linspace(t0, tf, n_dis)
+    dt_np = t_train_np[1] - t_train_np[0]
     t_prop_np = t_train_np  # keep same grid to isolate u interpolation effects
 
     t_train = torch.tensor(t_train_np, device=device, dtype=dtype)
     t_prop = torch.tensor(t_prop_np, device=device, dtype=dtype)
 
-    r0 = torch.tensor(r0_np, device=device, dtype=dtype)
-    v0 = torch.tensor(v0_np, device=device, dtype=dtype)
-    rf = torch.tensor(rf_np, device=device, dtype=dtype)
-    vf = torch.tensor(vf_np, device=device, dtype=dtype)
 
     # CE model
     model = CEModel.from_yaml(cfg, seed=args.seed, device=device, dtype=dtype)
@@ -263,7 +294,6 @@ def main():
     )
 
     # build betas object
-    from src.ponn.ce import CEBetas
     betas = CEBetas(beta_r=beta_r, beta_lam_r=beta_lam_r, beta_lam_v=beta_lam_v)
 
     # eval CE on train grid
@@ -289,6 +319,19 @@ def main():
         a_prop = (prop.r @ coeffs.M.T) + (prop.v @ coeffs.N.T) + u_prop
         a_c_prop = torch.linalg.norm(u_prop, dim=-1)
 
+        Cgs_tr = C_gs_from_cone(out_tr.r, cone=cone_obj, t=t_train)   # (N,)
+        Ca_tr = C_a_from_ctrl(a_c_tr, ctrl_obj)                       # (N,)
+
+        dyn_term_tr = (out_tr.r @ coeffs.M.T) + (out_tr.v @ coeffs.N.T) + u_tr
+
+        H_tr = (
+            0.5 * (a_c_tr ** 2)
+            + torch.sum(out_tr.lam_r * out_tr.v, dim=-1)
+            + torch.sum(out_tr.lam_v * dyn_term_tr, dim=-1)
+            + mu_gs * Cgs_tr
+            + mu_a * Ca_tr
+        )
+
     # numpy
     r_ce = out_tr.r.detach().cpu().numpy()
     v_ce = out_tr.v.detach().cpu().numpy()
@@ -310,6 +353,14 @@ def main():
     a_pr = a_prop.detach().cpu().numpy()
     u_pr_np = u_prop.detach().cpu().numpy()
     ac_pr = a_c_prop.detach().cpu().numpy()
+
+    Cgs_np = Cgs_tr.detach().cpu().numpy()
+    Ca_np = Ca_tr.detach().cpu().numpy()
+
+    H_ce = H_tr.detach().cpu().numpy()
+    dH_ce = H_ce - H_ce[0]
+
+    controleffort = (0.5 * ac_ce[0:n_dis-1]**2 * dt_np).sum()
 
     # basename to embed run_id / u_mode
     run_id = run_dir.name
@@ -435,9 +486,9 @@ def main():
     # =========================
     # fig4: mu_gs / mu_a
     # =========================
-    fig4, axes4 = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    fig4, axes4 = plt.subplots(2, 1, figsize=(10, 6), sharex=False)
 
-    axes4[0].plot(t_train_np, mu_gs_ce, linewidth=2.0, label="mu_gs (trained)")
+    axes4[0].plot(t_train_np[34:48], mu_gs_ce[34:48], linewidth=2.0, label="mu_gs (trained)")
     axes4[0].set_xlabel("t [s]")
     axes4[0].set_ylabel("mu_gs")
     axes4[0].grid(True, alpha=0.3)
@@ -460,6 +511,10 @@ def main():
     ax5 = fig5.add_subplot(111)
     ax5.plot(t_train_np, ac_ce, linewidth=2.0, label="a_c from CE(costate)")
     ax5.plot(t_prop_np, ac_pr, "--", linewidth=1.6, label="a_c (prop, ||u_prop||)")
+
+    a_c_max = float(cfg["constraints"]["control_max_km_s2"])
+    ax5.axhline(a_c_max, color="red", linestyle="--", linewidth=1.5, label="a_c max")
+
     ax5.set_title("a_c(t) (scalar)")
     ax5.set_xlabel("t [s]")
     ax5.set_ylabel("a_c [km/s^2]")
@@ -539,8 +594,8 @@ def main():
     # -------------------------
     # Fixed plot limits (as requested)
     # -------------------------
-    ax6.set_xlim(-0.2, 0.1)
-    ax6.set_ylim(-1.3, 0.0)
+    ax6.set_xlim(-0.1, 0.025)
+    ax6.set_ylim(-1.0, 0.0)
 
     # IMPORTANT: do NOT force equal aspect; allow different x/y scales
     # ax6.set_aspect("auto")  # (default)
@@ -553,6 +608,41 @@ def main():
 
     save_fig(fig6, outdir / f"fig6_xy_{suffix}.png")
 
+    # =========================
+    # fig7: Hamiltonian H(t)
+    # =========================
+    fig7 = plt.figure(figsize=(10, 4))
+    ax7 = fig7.add_subplot(111)
+    ax7.plot(t_train_np[:-2], H_ce[:-2], linewidth=2.0, label="Hamiltonian")
+    ax7.set_title("Hamiltonian vs time")
+    ax7.set_xlabel("t [s]")
+    ax7.set_ylabel("H")
+    ax7.grid(True, alpha=0.3)
+    ax7.legend(loc="best")
+    fig7.tight_layout()
+    save_fig(fig7, outdir / f"fig7_hamiltonian_{suffix}.png")
+
+    # =========================
+    # fig8: C_gs / C_a
+    # =========================
+    fig8, axes8 = plt.subplots(2, 1, figsize=(10, 6), sharex=False)
+
+    axes8[0].plot(t_train_np[34:48], Cgs_np[34:48], linewidth=2.0, label="C_gs (trained)")
+    axes8[0].set_xlabel("t [s]")
+    axes8[0].set_ylabel("C_gs")
+    axes8[0].grid(True, alpha=0.3)
+    axes8[0].legend(loc="best")
+
+    axes8[1].plot(t_train_np, Ca_np, linewidth=2.0, label="C_a (trained)")
+    axes8[1].set_xlabel("t [s]")
+    axes8[1].set_ylabel("C_a")
+    axes8[1].grid(True, alpha=0.3)
+    axes8[1].legend(loc="best")
+
+    fig8.suptitle("rows: C_gs/C_a", y=0.98)
+    fig8.tight_layout()
+    save_fig(fig8, outdir / f"fig8_constraints_{suffix}.png")
+
     if args.show:
         # if you want to see them too, re-open by not closing; easiest is to just not show by default.
         # Here we just inform where files are saved.
@@ -560,6 +650,7 @@ def main():
         # If you really want interactive display too, comment out plt.close in save_fig and call plt.show() here.
 
     print("Done.")
+    print("controleffort (0.5 * a_c^2 * dt) =", controleffort*1e6, "m^2/s^3")
 
 
 if __name__ == "__main__":

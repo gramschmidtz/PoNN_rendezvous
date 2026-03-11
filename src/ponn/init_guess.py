@@ -379,4 +379,4 @@ def init_guess(
     betas = tmp_betas
     mu_gs_vec = torch.full((N,), float(mu_gs_init), device=device, dtype=dtype)
 
-    return TrainParams(betas=betas, mu_a=mu_a_vec, mu_gs=mu_gs_vec)
+    return TrainParams(betas=betas, mu_a=mu_a_vec, mu_gs=mu_gs_vec), u, a_c, a_c_hat

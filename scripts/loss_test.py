@@ -135,9 +135,9 @@ def main():
     ap.add_argument("--dtype", type=str, default="float64", choices=["float32", "float64"])
     ap.add_argument("--seed", type=int, default=0)
 
-    ap.add_argument("--init", type=str, default="linear", choices=["zero", "linear"])
-    ap.add_argument("--mu_a", type=float, default=1e-3)
-    ap.add_argument("--mu_gs", type=float, default=1.0)
+    ap.add_argument("--init", type=str, default="zero", choices=["zero", "linear"])
+    ap.add_argument("--mu_a", type=float, default=1e-5)
+    ap.add_argument("--mu_gs", type=float, default=0.0)
     ap.add_argument("--ridge", type=float, default=1e-8)
 
     ap.add_argument("--near_tol_km", type=float, default=1e-3)
@@ -170,7 +170,7 @@ def main():
     model = CEModel.from_yaml(cfg, seed=args.seed, device=device, dtype=dtype)
 
     # init guess on TRAIN grid
-    guess = init_guess(
+    guess, _, _, _ = init_guess(
         model,
         t,
         coeffs=coeffs,

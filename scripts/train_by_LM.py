@@ -390,7 +390,7 @@ def main():
     mu_a_init = float(ig.get("mu_a_init", 1e-3))
     mu_gs_init = float(ig.get("mu_gs_init", 1.0))
 
-    guess = init_guess(
+    guess,_,_,_ = init_guess(
         model,
         t,
         coeffs=coeffs,
